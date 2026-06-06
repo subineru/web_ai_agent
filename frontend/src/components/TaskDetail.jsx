@@ -3,6 +3,7 @@ import {
   answerClarification,
   artifactUrl,
   followUp,
+  getJobMessages,
   pauseJob,
   provideCredentials,
   resumeJob,
@@ -13,6 +14,10 @@ import {
 } from '../api.js'
 
 const TERMINAL = ['succeeded', 'partial', 'failed', 'closed']
+
+function safeParse(s) {
+  try { return JSON.parse(s) } catch { return null }
+}
 
 const STATUS_LABEL = {
   connecting:       '連線中',
@@ -34,6 +39,7 @@ export default function TaskDetail({ jobId, instruction, onFollowup }) {
   const [showCreds, setShowCreds] = useState(false)
   const [cred, setCred] = useState({ domain: '', user: '', pass: '' })
   const [artifacts, setArtifacts] = useState([])
+  const [tokenStats, setTokenStats] = useState(null)  // B8
   const endRef = useRef(null)
 
   // role: 'user' | 'agent' | 'think' | 'system'
@@ -48,6 +54,32 @@ export default function TaskDetail({ jobId, instruction, onFollowup }) {
     setFeedbackDone(false)
     setShowCreds(false)
     setArtifacts([])
+    setTokenStats(null)
+
+    let closed = false
+
+    // 用 DB 真相整批重建畫面（mount / done / error 皆呼叫）。
+    // DB 為單一真相 → 即使 live SSE 漏掉尾段，結果/推理/下載仍會補齊。
+    async function reconcile() {
+      const msgs = await getJobMessages(jobId)
+      if (closed || !msgs.length) return
+      // 原始任務指示不存進 DB，故對帳時補回最前面，避免重建後消失。
+      const head = instruction ? [{ role: 'user', text: instruction, id: 0 }] : []
+      const rest = msgs.map((m, i) => ({
+        role: m.role,
+        text: m.text,
+        kind: m.kind,
+        extra: m.extra && m.role === 'think' ? safeParse(m.extra) : null,
+        id: i + 1,
+      }))
+      setMessages([...head, ...rest])
+      // 還原 artifacts（存在 done 訊息的 extra 內）
+      const doneMsg = [...msgs].reverse().find((m) => m.kind === 'result' || m.kind === 'error')
+      if (doneMsg?.extra) {
+        const arr = safeParse(doneMsg.extra)
+        if (Array.isArray(arr) && arr.length) setArtifacts(arr)
+      }
+    }
 
     const es = subscribeEvents(jobId, {
       onStatus:        (d) => setStatus(d.status),
@@ -60,13 +92,16 @@ export default function TaskDetail({ jobId, instruction, onFollowup }) {
       },
       onDone: (d) => {
         setStatus(d.status)
-        if (d.result) add('agent', d.result, 'result')
-        if (d.error)  add('agent', `${d.error}`, 'error')
-        if (d.artifacts?.length) setArtifacts(d.artifacts)  // C3
+        if (d.token_stats?.calls > 0) setTokenStats(d.token_stats)  // B8
+        // 不再「只信」live 的 d.result/d.artifacts；done 後一律向 DB 對帳。
+        reconcile()
       },
-      onError: () => {},
+      onError: () => { reconcile() },  // SSE 斷線/錯誤 → 改用 DB 真相對帳
     })
-    return () => es.close()
+
+    reconcile()  // mount 立即對帳（還原已完成 / 重啟後的任務）
+
+    return () => { closed = true; es.close() }
   }, [jobId, instruction])
 
   useEffect(() => {
@@ -213,6 +248,15 @@ export default function TaskDetail({ jobId, instruction, onFollowup }) {
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* B8: token 用量統計 */}
+        {tokenStats?.calls > 0 && (
+          <div className="token-stats">
+            🔢 {tokenStats.input?.toLocaleString()} in / {tokenStats.output?.toLocaleString()} out tokens
+            &nbsp;·&nbsp; {tokenStats.calls} 呼叫
+            {tokenStats.cost > 0 && <>&nbsp;·&nbsp; ${tokenStats.cost?.toFixed(4)}</>}
           </div>
         )}
 

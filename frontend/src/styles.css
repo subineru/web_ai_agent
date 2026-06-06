@@ -743,6 +743,15 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
 
 .artifact-link:hover { background: var(--surface3); border-color: var(--accent-t); }
 
+/* B8: token 用量統計 */
+.token-stats {
+  padding: 5px 22px;
+  font-size: 11px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  border-bottom: 1px solid var(--border-s);
+}
+
 /* Execution controls */
 .steer-controls {
   display: flex;

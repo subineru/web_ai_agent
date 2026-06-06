@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { deleteJobDb } from './api.js'
 import TaskForm from './components/TaskForm.jsx'
 import TaskList from './components/TaskList.jsx'
 import TaskDetail from './components/TaskDetail.jsx'
@@ -28,7 +29,8 @@ export default function App() {
     addJob({ jobId: newJobId, instruction: message, at: Date.now() })
   }
 
-  function deleteJob(jobId) {
+  async function deleteJob(jobId) {
+    await deleteJobDb(jobId)  // DB：訊息 + job + task 全清
     const next = jobs.filter((j) => j.jobId !== jobId)
     setJobs(next)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next))

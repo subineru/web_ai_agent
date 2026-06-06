@@ -126,3 +126,21 @@ class SqlTaskRepo:
     def list_job_ids(self) -> list[str]:
         with self._sf() as s:
             return list(s.exec(select(JobRow.id)).all())
+
+    def delete_job(self, job_id: str) -> None:
+        """刪除 job；若其 task 已無其他 job 參照，連 task 一併刪除。"""
+        with self._sf() as s:
+            row = s.get(JobRow, job_id)
+            if row is None:
+                return
+            task_id = row.task_id
+            s.delete(row)
+            s.commit()
+            others = s.exec(
+                select(JobRow.id).where(JobRow.task_id == task_id)
+            ).first()
+            if others is None:
+                task_row = s.get(TaskRow, task_id)
+                if task_row is not None:
+                    s.delete(task_row)
+                    s.commit()

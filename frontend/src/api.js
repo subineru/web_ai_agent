@@ -80,3 +80,22 @@ export function subscribeEvents(
 export function artifactUrl(jobId, filename) {
   return `/jobs/${jobId}/artifacts/${encodeURIComponent(filename)}`
 }
+
+// message-db: 取得任務完整對話歷史（前端對帳用，DB 為單一真相）。
+export async function getJobMessages(jobId) {
+  try {
+    const r = await fetch(`/jobs/${jobId}/messages`)
+    return r.ok ? r.json() : []
+  } catch {
+    return []
+  }
+}
+
+// message-db: 刪除任務（DB 中訊息 + job + task 全清）。
+export async function deleteJobDb(jobId) {
+  try {
+    await fetch(`/jobs/${jobId}`, { method: 'DELETE' })
+  } catch {
+    // 後端不可用時，前端仍會從 localStorage 移除（呼叫端處理）
+  }
+}

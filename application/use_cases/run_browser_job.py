@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from application.use_cases.recover_from_error import RecoverFromError
@@ -18,6 +19,7 @@ from domain.ports import (
     DomainThrottle,
     JobEventPublisher,
     LearningStore,
+    MessageStore,
     SteeringRegistry,
     TaskRepo,
 )
@@ -38,6 +40,7 @@ class RunBrowserJob:
         learning: LearningStore | None = None,
         default_policy: str = "ai_then_human",
         credentials=None,
+        message_store: MessageStore | None = None,
     ) -> None:
         self._repo = repo
         self._agent = agent
@@ -49,10 +52,40 @@ class RunBrowserJob:
         self._learning = learning
         self._default_policy = default_policy
         self._credentials = credentials
+        self._message_store = message_store
 
     def _emit(self, job_id: str, type_: str, data: dict) -> None:
+        # 先持久化再廣播：確保前端收到 done/事件後向 DB 對帳時，資料已寫入。
+        self._persist_message(job_id, type_, data)
         if self._publisher is not None:
             self._publisher.publish(job_id, JobEvent(type=type_, data=data))
+
+    def _persist_message(self, job_id: str, type_: str, data: dict) -> None:
+        """把對外事件同步存進 MessageStore，作為前端對帳的單一真相來源。"""
+        ms = self._message_store
+        if ms is None:
+            return
+        try:
+            if type_ == "step":
+                ms.save(job_id, "agent", data.get("description"))
+            elif type_ == "think":
+                ms.save(job_id, "think", None, extra=json.dumps(data, ensure_ascii=False))
+            elif type_ == "clarification":
+                ms.save(job_id, "agent", data.get("reason"), kind="clarify")
+            elif type_ == "reuse":
+                ms.save(
+                    job_id,
+                    "system",
+                    f"💡 重用了 {data.get('count')} 條在 {data.get('domain')} 的既有經驗",
+                )
+            elif type_ == "done":
+                artifacts_json = json.dumps(data.get("artifacts", []), ensure_ascii=False)
+                if data.get("result"):
+                    ms.save(job_id, "agent", data["result"], kind="result", extra=artifacts_json)
+                elif data.get("error"):
+                    ms.save(job_id, "agent", data["error"], kind="error", extra=artifacts_json)
+        except Exception:  # noqa: BLE001 — 持久化失敗不得影響任務執行/SSE
+            pass
 
     async def execute(self, job_id: str) -> Job:
         job = self._repo.get_job(job_id)
@@ -183,9 +216,16 @@ class RunBrowserJob:
             self._emit(job.id, "done", {"status": job.status.value, "error": job.error})
             return job
 
-        # C2: gateway 登入重啟已於內部處理，但如仍在 WAITING_FOR_USER（邊界情形）則保持等待
+        # C2: 登入接棒由 AnswerClarification 在「另一個 job 實例」上 resume 並寫回 DB，
+        # 本執行緒持有的本地 job 不會被更新（仍 stale 停在 WAITING_FOR_USER）。
+        # agent.run() 既已返回 = 接棒已結束 → 以 DB 真相判斷是否仍在等待，
+        # 不可用 stale 的本地狀態，否則會提早 return、不 succeed、不發 done、不存 result。
+        db_job = self._repo.get_job(job.id)
+        if db_job is not None and db_job.status.value == "waiting_for_user":
+            return job  # DB 也仍在等待（使用者真的沒回覆）→ 保持等待
         if job.status.value == "waiting_for_user":
-            return job
+            # 本地 stale，但 DB 已 resume → 同步回 RUNNING 才能推進到 succeed/fail
+            job.resume()
 
         if result.success:
             job.succeed(result=result.output or "")
@@ -209,6 +249,7 @@ class RunBrowserJob:
                 "result": job.result,
                 "error": job.error,
                 "artifacts": list(result.artifacts),
+                "token_stats": result.token_stats,  # B8: token 用量統計
             },
         )
         return job

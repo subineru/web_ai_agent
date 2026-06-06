@@ -65,3 +65,22 @@ def test_get_missing_returns_none(engine):
     repo = SqlTaskRepo(lambda: Session(engine))
     assert repo.get_task("nope") is None
     assert repo.get_job("nope") is None
+
+
+def test_delete_job_removes_job_and_orphan_task(engine):
+    repo = SqlTaskRepo(lambda: Session(engine))
+    task = Task.create(instruction="抓")
+    repo.add_task(task)
+    job = Job.create(task_id=task.id)
+    repo.add_job(job)
+
+    repo.delete_job(job.id)
+
+    assert repo.get_job(job.id) is None
+    # task 已無其他 job 參照 → 一併刪除
+    assert repo.get_task(task.id) is None
+
+
+def test_delete_job_is_noop_for_missing(engine):
+    repo = SqlTaskRepo(lambda: Session(engine))
+    repo.delete_job("nope")  # 不應拋例外
