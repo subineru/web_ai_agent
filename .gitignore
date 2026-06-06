@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.import_linter_cache/
+.agents/
+.claude
+docs/
+
+# uv
+# (uv.lock IS committed)
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Playwright / browsers
+.cache/
+playwright-report/
+
+# Runtime artifacts (agent outputs, sessions) — keep dir, ignore contents
+workspace/
+infrastructure/session/state/
+*.sqlite
+*.db
+
+# 自動產生的文件（由 PostToolUse hook / scripts/ 維護，不需追蹤）
+CLAUDE.md
+PLAN.md
+
+# OS
+.DS_Store
+Thumbs.db

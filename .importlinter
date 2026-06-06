@@ -1,0 +1,29 @@
+[importlinter]
+include_external_packages = True
+root_packages =
+    domain
+    application
+    adapters
+    infrastructure
+
+[importlinter:contract:clean-architecture-layers]
+name = Clean Architecture layers (dependencies point inward only)
+type = layers
+layers =
+    infrastructure
+    adapters
+    application
+    domain
+
+[importlinter:contract:domain-is-framework-free]
+name = Domain must not depend on frameworks
+type = forbidden
+include_external_packages = True
+source_modules =
+    domain
+forbidden_modules =
+    fastapi
+    browser_use
+    sqlmodel
+    sqlalchemy
+    uvicorn
