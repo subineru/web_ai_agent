@@ -9,6 +9,7 @@ from sqlmodel import Session, SQLModel, create_engine
 # 確保所有 table 模型在 create_all/migration 前已註冊到 metadata
 import adapters.persistence.sql_feedback_store  # noqa: F401
 import adapters.persistence.sql_learning_store  # noqa: F401
+import adapters.persistence.sql_message_store  # noqa: F401
 import adapters.persistence.sql_task_repo  # noqa: F401
 
 

@@ -78,6 +78,8 @@ def _run(use_case_call):
 @router.post("/jobs/{job_id}/steer")
 async def steer(job_id: str, body: SteerBody, request: Request):
     c = request.app.state.container
+    if getattr(c, "message_store", None) is not None:
+        c.message_store.save(job_id, "user", body.message)
     return _run(lambda: c.steer_job().execute(job_id, body.message))
 
 
@@ -102,6 +104,8 @@ async def stop(job_id: str, request: Request):
 @router.post("/jobs/{job_id}/answer")
 async def answer(job_id: str, body: AnswerBody, request: Request):
     c = request.app.state.container
+    if getattr(c, "message_store", None) is not None:
+        c.message_store.save(job_id, "user", body.answer)
     return _run(lambda: c.answer_clarification().execute(job_id, body.answer))
 
 
@@ -226,6 +230,24 @@ async def download_artifact(job_id: str, filename: str):
     return FileResponse(str(path), filename=safe)
 
 
+@router.get("/jobs/{job_id}/messages")
+async def get_messages(job_id: str, request: Request):
+    """取得任務完整對話歷史（前端對帳的單一真相來源）。"""
+    ms = getattr(request.app.state.container, "message_store", None)
+    return ms.list_by_job(job_id) if ms is not None else []
+
+
+@router.delete("/jobs/{job_id}", status_code=204)
+async def delete_job(job_id: str, request: Request):
+    """刪除任務：DB 中訊息、job、task 全清。"""
+    c = request.app.state.container
+    if getattr(c, "message_store", None) is not None:
+        c.message_store.delete_by_job(job_id)
+    if hasattr(c.repo, "delete_job"):
+        c.repo.delete_job(job_id)
+    return Response(status_code=204)
+
+
 @router.get("/tasks/{job_id}/events")
 async def stream_events(job_id: str, request: Request):
     """SSE：即時串流任務事件（status / step / done）。"""
@@ -233,7 +255,12 @@ async def stream_events(job_id: str, request: Request):
 
     async def gen():
         async for ev in broker.stream(job_id):
-            yield {"event": ev.type, "data": json.dumps(ev.data, ensure_ascii=False)}
+            # 加固：單一事件序列化失敗不得殺掉整條串流（否則尾段全失）。
+            try:
+                data = json.dumps(ev.data, ensure_ascii=False)
+            except (TypeError, ValueError):
+                data = json.dumps({"_unserializable": True})
+            yield {"event": ev.type, "data": data}
 
     return EventSourceResponse(gen())
 

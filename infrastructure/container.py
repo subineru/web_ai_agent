@@ -17,6 +17,7 @@ from domain.ports import (
     DomainThrottle,
     FeedbackPort,
     LearningStore,
+    MessageStore,
     SessionStore,
     SteeringRegistry,
     TaskRepo,
@@ -43,6 +44,7 @@ class Container:
     throttle: DomainThrottle | None = None
     default_handoff_policy: str = "ai_then_human"
     credentials: InMemoryCredentialVault = field(default_factory=InMemoryCredentialVault)
+    message_store: MessageStore | None = None
 
     @classmethod
     def create(
@@ -55,6 +57,7 @@ class Container:
         from adapters.agents.browser_use_gateway import BrowserUseGateway
         from adapters.persistence.sql_feedback_store import SqlFeedbackStore
         from adapters.persistence.sql_learning_store import SqlLearningStore
+        from adapters.persistence.sql_message_store import SqlMessageStore
         from adapters.persistence.sql_task_repo import SqlTaskRepo
         from infrastructure.browseruse.agent_factory import make_browser_use_agent_factory
         from infrastructure.compliance import UrllibRobotsChecker
@@ -74,6 +77,7 @@ class Container:
             feedback_store=SqlFeedbackStore(sf),
             session_store=FileSessionStore(),
             learning=SqlLearningStore(sf),
+            message_store=SqlMessageStore(sf),
             compliance=CheckCompliance(
                 robots=UrllibRobotsChecker(),
                 denylist=s.denylist_items(),
@@ -106,6 +110,7 @@ class Container:
             learning=self.learning,
             default_policy=self.default_handoff_policy,
             credentials=self.credentials,
+            message_store=self.message_store,
         )
 
     def provide_credentials(self) -> ProvideCredentials:

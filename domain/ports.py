@@ -90,6 +90,28 @@ class FeedbackPort(Protocol):
 
 
 @runtime_checkable
+class MessageStore(Protocol):
+    """對話訊息的持久化（步驟、推理、澄清、結果、使用者輸入）。
+
+    作為前端對帳的單一真相來源：即使 SSE 漏送尾段事件，
+    前端也能向 list_by_job 取回完整對話重建畫面。
+    """
+
+    def save(
+        self,
+        job_id: str,
+        role: str,
+        text: str | None,
+        kind: str | None = None,
+        extra: str | None = None,
+    ) -> None: ...
+
+    def list_by_job(self, job_id: str) -> list[dict]: ...
+
+    def delete_by_job(self, job_id: str) -> None: ...
+
+
+@runtime_checkable
 class SessionStore(Protocol):
     """瀏覽器登入狀態的持久化（對應 storage_state / profile）。"""
 

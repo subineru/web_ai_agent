@@ -135,3 +135,5 @@ class AgentRunResult:
     steps: tuple[AgentStep, ...] = field(default_factory=tuple)
     error: str | None = None
     artifacts: tuple[str, ...] = field(default_factory=tuple)  # C3: 下載檔案名清單
+    # B8: token 用量統計（input/output/calls，可選）
+    token_stats: dict = field(default_factory=dict)

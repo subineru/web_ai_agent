@@ -109,6 +109,8 @@ class BrowserUseGateway:
         # 利用「bu_step_cb 在 done action 執行前觸發」的時間窗口，
         # 確保 _downloaded_files 被 reset() 清空前已被記錄。
         _seen_artifacts: set[str] = set()
+        # B8: token 用量統計（跨所有 attempt 累積）
+        token_stats: dict = {"input": 0, "output": 0, "calls": 0}
         login_emitted: list[bool] = [False]
         # session-persist: 優先從磁碟載入已持久化的登入狀態
         initial_storage = _load_session(start_url) if start_url else None
@@ -252,8 +254,27 @@ class BrowserUseGateway:
                 control=control,
                 login_step_emitter=_login_step_emitter,
                 session_saver=_session_saver,
+                # B8: 對話日誌
+                save_log_path=(
+                    user_data_dir / f"conversation_{_attempt}.json"
+                    if user_data_dir
+                    else None
+                ),
             )
             history = await agent.run(max_steps=max_steps)
+
+            # B8: 從 history.usage（browser-use 內建 UsageSummary）累積 token 用量
+            try:
+                u = getattr(history, "usage", None)
+                if u is not None:
+                    token_stats["input"]  += getattr(u, "total_prompt_tokens",     0)
+                    token_stats["output"] += getattr(u, "total_completion_tokens", 0)
+                    token_stats["calls"]  += getattr(u, "entry_count",             0)
+                    cost = getattr(u, "total_cost", None)
+                    if cost:
+                        token_stats["cost"] = token_stats.get("cost", 0.0) + cost
+            except Exception:  # noqa: BLE001
+                pass
 
             logger.info(
                 "C2: history success=%s, login_emitted=%s",
@@ -274,8 +295,40 @@ class BrowserUseGateway:
 
             break  # 成功、或非登入失敗、或使用者停止
 
-        # C3: 從 bu_step_cb 累積的 set 取得所有已下載檔案（不依賴已被 reset() 清空的 list）
-        all_artifacts = tuple(sorted(_seen_artifacts))
+        # B8: 記錄 token 用量（來自 history.usage，含 browser-use 按模型定價計算的成本）
+        if token_stats["calls"] > 0:
+            logger.info(
+                "B8 token usage: input=%d output=%d calls=%d cost=$%.4f",
+                token_stats["input"],
+                token_stats["output"],
+                token_stats["calls"],
+                token_stats.get("cost", 0.0),
+            )
+
+        # C3: 三重保障取得已下載檔案
+        # 1. step callback 累積（_seen_artifacts，CDP 非同步時序不保證完整）
+        # 2. history 的 done action attachments（終端機 log 中的 files_to_display，最直接）
+        # 3. 目錄掃描（磁碟上的實體檔案，不受 reset() 影響，最終補底）
+
+        history_artifacts: set[str] = set()
+        try:
+            if history.history:
+                for result in history.history[-1].result or []:
+                    for fpath in result.attachments or []:
+                        fname = Path(fpath).name
+                        if fname:
+                            history_artifacts.add(fname)
+        except Exception:  # noqa: BLE001
+            pass
+
+        dir_artifacts: set[str] = set()
+        if download_dir is not None and download_dir.is_dir():
+            try:
+                dir_artifacts = {f.name for f in download_dir.iterdir() if f.is_file()}
+            except Exception:  # noqa: BLE001
+                pass
+
+        all_artifacts = tuple(sorted(_seen_artifacts | history_artifacts | dir_artifacts))
 
         success = bool(history.is_successful())
         final = history.final_result()
@@ -286,6 +339,7 @@ class BrowserUseGateway:
                 steps=tuple(steps),
                 error=None,
                 artifacts=all_artifacts,
+                token_stats=dict(token_stats),
             )
         return AgentRunResult(
             success=False,
@@ -293,4 +347,5 @@ class BrowserUseGateway:
             steps=tuple(steps),
             error=final or "agent 未完成任務",
             artifacts=all_artifacts,
+            token_stats=dict(token_stats),
         )

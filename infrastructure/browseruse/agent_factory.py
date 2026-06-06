@@ -27,6 +27,9 @@ _HUMAN_ACTION_SYSTEM_HINT = (
 )
 
 
+# B8: Token 用量由 history.usage（browser-use 內建）讀取，不需 callback
+
+
 def make_browser_use_agent_factory(settings: Settings | None = None) -> Callable[..., Any]:
     s = settings or get_settings()
 
@@ -43,6 +46,8 @@ def make_browser_use_agent_factory(settings: Settings | None = None) -> Callable
         control: Any = None,
         login_step_emitter: LoginStepEmitter | None = None,
         session_saver: SessionSaver | None = None,
+        # B8: 對話日誌（token 用量由 history.usage 讀取，不需注入）
+        save_log_path: Path | None = None,
     ) -> Any:
         from browser_use import Agent, BrowserProfile, Controller
         from browser_use.agent.views import ActionResult
@@ -111,6 +116,11 @@ def make_browser_use_agent_factory(settings: Settings | None = None) -> Callable
             controller=controller,
             extend_system_message=_HUMAN_ACTION_SYSTEM_HINT,
         )
+
+        # B8: 對話日誌（browser-use 原生支援，儲存完整 LLM 對話）
+        if save_log_path is not None:
+            save_log_path.parent.mkdir(parents=True, exist_ok=True)
+            kwargs["save_conversation_path"] = str(save_log_path)
 
         # BrowserProfile: keep_alive=True + 可選 storage_state（已登入 cookies）
         profile_kwargs: dict[str, Any] = {"headless": s.headless, "keep_alive": True}

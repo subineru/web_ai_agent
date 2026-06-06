@@ -24,17 +24,22 @@ class InMemoryEventBroker:
             q.put_nowait(event)
 
     async def stream(self, job_id: str) -> AsyncIterator[JobEvent]:
-        # 1) 先回放 history 快照
-        snapshot = list(self._history.get(job_id, []))
-        for ev in snapshot:
-            yield ev
-            if ev.is_terminal:
-                return
-
-        # 2) 再接即時事件，直到終結
+        # 1) 先訂閱 queue（在取 snapshot 之前），確保 snapshot 回放期間 publish 的事件
+        #    不會因「還沒有訂閱者」而遺失。
+        #    asyncio 單執行緒：append + list 之間無 await，其他協程無法插入，
+        #    故 snapshot 只含訂閱前的事件，queue 只含訂閱後的事件，無重複也無遺漏。
         q: asyncio.Queue[JobEvent] = asyncio.Queue()
         self._subs[job_id].append(q)
+
         try:
+            # 2) 回放 snapshot（訂閱之前已發生的事件）
+            snapshot = list(self._history.get(job_id, []))
+            for ev in snapshot:
+                yield ev
+                if ev.is_terminal:
+                    return
+
+            # 3) 接即時事件（訂閱之後 publish 的，含 snapshot 回放期間新增的）
             while True:
                 ev = await q.get()
                 yield ev
